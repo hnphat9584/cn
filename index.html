@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Process Manager</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        h1 {
+            color: #333;
+            margin-top: 0;
+        }
+        h2 {
+            color: #666;
+            border-bottom: 2px solid #007bff;
+            padding-bottom: 10px;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            font-weight: bold;
+        }
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+            font-size: 14px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        button.danger {
+            background: #dc3545;
+        }
+        button.danger:hover {
+            background: #c82333;
+        }
+        input[type="text"] {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 300px;
+            margin-right: 10px;
+        }
+        #output {
+            background: #f8f9fa;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 15px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        th, td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background: #f8f9fa;
+            font-weight: 600;
+        }
+        tr:hover {
+            background: #f8f9fa;
+        }
+        .process-list, .app-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔌 WebSocket Process Manager</h1>
+    
+    <div class="container">
+        <h2>Connection</h2>
+        <div id="status" class="status disconnected">Disconnected</div>
+        <button id="connectBtn" onclick="connect()">Connect to Server</button>
+        <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+    </div>
+
+    <div class="container">
+        <h2>Process Control</h2>
+        <button onclick="listProcesses()">Refresh Process List</button>
+        <div style="margin-top: 10px;">
+            <input type="text" id="processPath" placeholder="Enter process path (e.g., notepad.exe or C:\path\to\app.exe)">
+            <button onclick="startProcessDirect()">Start Process</button>
+        </div>
+        <p style="color: #666; font-size: 14px; margin-top: 10px;">Click "Kill" button next to any process to terminate it</p>
+        <div class="process-list" id="processList"></div>
+    </div>
+
+    <div class="container">
+        <h2>Application Control</h2>
+        <button onclick="listApplications()">List Applications</button>
+        <div style="margin-top: 10px;">
+            <input type="text" id="appSearch" placeholder="Search applications..." onkeyup="filterApplications()">
+        </div>
+        <div style="background: #fff3cd; border: 1px solid #ffc107; padding: 10px; margin: 10px 0; border-radius: 4px; font-size: 14px;">
+            ℹ️ <strong>Note:</strong> Apps marked "N/A" are either Windows Store apps (UWP) or their executable couldn't be found. 
+            You can launch these apps from the Windows Start Menu or use the Process Control section to start them by name (e.g., "calculator:", "ms-settings:").
+        </div>
+        <div class="app-list" id="appList"></div>
+    </div>
+
+    <div class="container">
+        <h2>Console Output</h2>
+        <button onclick="clearOutput()">Clear</button>
+        <div id="output"></div>
+    </div>
+
+    <script>
+        let ws = null;
+
+        function log(message, type = 'info') {
+            const output = document.getElementById('output');
+            const timestamp = new Date().toLocaleTimeString();
+            const prefix = type === 'error' ? '❌' : type === 'success' ? '✅' : 'ℹ️';
+            output.innerHTML += `[${timestamp}] ${prefix} ${message}\n`;
+            output.scrollTop = output.scrollHeight;
+        }
+
+        function updateStatus(connected) {
+            const status = document.getElementById('status');
+            const connectBtn = document.getElementById('connectBtn');
+            const disconnectBtn = document.getElementById('disconnectBtn');
+            
+            if (connected) {
+                status.textContent = 'Connected to ws://localhost:8080';
+                status.className = 'status connected';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+            } else {
+                status.textContent = 'Disconnected';
+                status.className = 'status disconnected';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+            }
+        }
+
+        function connect() {
+            if (ws) return;
+            
+            log('Connecting to ws://localhost:8080...');
+            ws = new WebSocket('ws://localhost:8080');
+            
+            ws.onopen = () => {
+                log('Connected successfully!', 'success');
+                updateStatus(true);
+            };
+            
+            ws.onmessage = (event) => {
+                log('Received: ' + event.data);
+                try {
+                    const data = JSON.parse(event.data);
+                    log('Parsed data: ' + JSON.stringify(data).substring(0, 200) + '...');
+                    handleResponse(data);
+                } catch (e) {
+                    log('Failed to parse response: ' + e.message, 'error');
+                }
+            };
+            
+            ws.onerror = (error) => {
+                log('WebSocket error occurred', 'error');
+            };
+            
+            ws.onclose = () => {
+                log('Connection closed', 'error');
+                updateStatus(false);
+                ws = null;
+            };
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+        }
+
+        function send(command) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                log('Not connected to server!', 'error');
+                return;
+            }
+            log('Sending: ' + command);
+            ws.send(command);
+        }
+
+        function listProcesses() {
+            send('list_processes');
+        }
+
+        function listApplications() {
+            send('list_applications');
+        }
+
+        function stopProcess() {
+            const pid = document.getElementById('pidInput').value;
+            if (!pid) {
+                alert('Please enter a PID');
+                return;
+            }
+            send('stop_process:' + pid);
+        }
+
+        function startProcessDirect() {
+            const path = document.getElementById('processPath').value;
+            if (!path) {
+                alert('Please enter a process path');
+                return;
+            }
+            send('start_process:' + path);
+        }
+
+        function handleResponse(data) {
+            log('Handling response type: ' + (Array.isArray(data) ? 'Array' : typeof data));
+            
+            if (Array.isArray(data)) {
+                log('Array length: ' + data.length);
+                if (data.length > 0) {
+                    log('First item keys: ' + Object.keys(data[0]).join(', '));
+                    
+                    if (data[0].pid !== undefined) {
+                        log('Detected as process list');
+                        displayProcesses(data);
+                    } else if (data[0].exe !== undefined || data[0].path !== undefined || data[0].name !== undefined) {
+                        log('Detected as application list');
+                        displayApplications(data);
+                    } else {
+                        log('Unknown array type', 'error');
+                    }
+                } else {
+                    log('Empty array received', 'error');
+                }
+            } else if (data.status) {
+                if (data.status === 'success') {
+                    log('Operation successful: ' + JSON.stringify(data), 'success');
+                } else {
+                    log('Operation failed: ' + data.message, 'error');
+                }
+            } else {
+                log('Unknown response format', 'error');
+            }
+        }
+
+        function displayProcesses(processes) {
+            const list = document.getElementById('processList');
+            
+            if (!processes || processes.length === 0) {
+                list.innerHTML = '<p style="color: #999;">No processes found</p>';
+                return;
+            }
+            
+            let html = '<table><tr><th>PID</th><th>Process Name</th><th>Action</th></tr>';
+            
+            processes.forEach(proc => {
+                html += `<tr>
+                    <td><strong>${proc.pid}</strong></td>
+                    <td>${proc.name}</td>
+                    <td><button class="danger" onclick="killProcess(${proc.pid}, '${proc.name}')">Kill</button></td>
+                </tr>`;
+            });
+            
+            html += '</table>';
+            list.innerHTML = html;
+            log(`Displayed ${processes.length} processes`, 'success');
+        }
+
+        function killProcess(pid, name) {
+            if (confirm(`Are you sure you want to kill "${name}" (PID: ${pid})?`)) {
+                send('stop_process:' + pid);
+                log(`Attempting to kill ${name} (PID: ${pid})...`);
+            }
+        }
+
+        function displayApplications(apps) {
+            log('displayApplications called with ' + apps.length + ' items');
+            const list = document.getElementById('appList');
+            
+            if (!list) {
+                log('ERROR: appList element not found!', 'error');
+                return;
+            }
+            
+            if (!apps || apps.length === 0) {
+                list.innerHTML = '<p style="color: #999; padding: 20px;">No applications found. The scan might take a moment...</p>';
+                log('No applications to display', 'error');
+                return;
+            }
+            
+            allApps = apps; // Store for filtering
+            
+            // Count launchable vs non-launchable
+            const launchable = apps.filter(app => app.exe !== 'N/A' && app.path).length;
+            const total = apps.length;
+            
+            let html = `<p style="color: #666; font-size: 14px; margin-bottom: 10px;">
+                Showing ${total} applications (${launchable} launchable via this tool, ${total - launchable} require Windows Store/Start Menu)
+            </p>`;
+            
+            html += '<table><tr><th>Application</th><th>Publisher</th><th>Executable</th><th>Status</th><th>Action</th></tr>';
+            
+            apps.forEach((app, index) => {
+                log(`App ${index}: ${JSON.stringify(app)}`);
+                const appName = app.name || 'Unknown';
+                const publisher = app.publisher || '';
+                const exeName = app.exe || 'N/A';
+                const fullPath = app.path || '';
+                
+                const canLaunch = exeName !== 'N/A' && fullPath !== '';
+                const statusIcon = canLaunch ? '✅' : '⚠️';
+                const statusText = canLaunch ? 'Ready' : 'UWP/Store App';
+                
+                html += `<tr>
+                    <td><strong>${appName}</strong></td>
+                    <td style="font-size: 11px; color: #666;">${publisher}</td>
+                    <td style="font-size: 11px;">${exeName}</td>
+                    <td style="font-size: 12px;">${statusIcon} ${statusText}</td>
+                    <td>${canLaunch ? `<button onclick="launchApp('${fullPath.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')">Launch</button>` : '<span style="color: #999;">Use Start Menu</span>'}</td>
+                </tr>`;
+            });
+            
+            html += '</table>';
+            list.innerHTML = html;
+            log(`SUCCESS: Displayed ${apps.length} applications (${launchable} launchable)`, 'success');
+        }
+
+        function launchApp(path) {
+            send('start_process:' + path);
+            log(`Launching: ${path}`);
+        }
+
+        let allApps = [];
+
+        function filterApplications() {
+            const searchTerm = document.getElementById('appSearch').value.toLowerCase();
+            const filtered = allApps.filter(app => 
+                app.name.toLowerCase().includes(searchTerm) || 
+                (app.exe && app.exe.toLowerCase().includes(searchTerm)) ||
+                (app.publisher && app.publisher.toLowerCase().includes(searchTerm))
+            );
+            displayApplicationsFiltered(filtered);
+        }
+
+        function displayApplicationsFiltered(apps) {
+            const list = document.getElementById('appList');
+            
+            if (!apps || apps.length === 0) {
+                list.innerHTML = '<p style="color: #999; padding: 20px;">No applications match your search.</p>';
+                return;
+            }
+            
+            let html = '<table><tr><th>Application</th><th>Publisher</th><th>Executable</th><th>Status</th><th>Action</th></tr>';
+            
+            apps.forEach((app) => {
+                const appName = app.name || 'Unknown';
+                const publisher = app.publisher || '';
+                const exeName = app.exe || 'N/A';
+                const fullPath = app.path || '';
+                
+                const canLaunch = exeName !== 'N/A' && fullPath !== '';
+                const statusIcon = canLaunch ? '✅' : '⚠️';
+                const statusText = canLaunch ? 'Ready' : 'UWP/Store App';
+                
+                html += `<tr>
+                    <td><strong>${appName}</strong></td>
+                    <td style="font-size: 11px; color: #666;">${publisher}</td>
+                    <td style="font-size: 11px;">${exeName}</td>
+                    <td style="font-size: 12px;">${statusIcon} ${statusText}</td>
+                    <td>${canLaunch ? `<button onclick="launchApp('${fullPath.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')">Launch</button>` : '<span style="color: #999;">Use Start Menu</span>'}</td>
+                </tr>`;
+            });
+            
+            html += '</table>';
+            list.innerHTML = html;
+        }
+
+        function clearOutput() {
+            document.getElementById('output').innerHTML = '';
+        }
+
+        // Auto-connect on load
+        window.onload = () => {
+            log('Page loaded. Click "Connect to Server" to begin.');
+        };
+    </script>
+</body>
+</html>
