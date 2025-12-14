@@ -52,7 +52,6 @@ private:
     }
     
     std::string sha1(const std::string& input) {
-        // Simple SHA1 - for production use a proper crypto library
         HCRYPTPROV hProv = 0;
         HCRYPTHASH hHash = 0;
         BYTE hash[20];
@@ -113,7 +112,6 @@ public:
         if (bind(serverSocket, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) return false;
         if (listen(serverSocket, SOMAXCONN) == SOCKET_ERROR) return false;
         
-        std::cout << "WebSocket server listening on port " << port << std::endl;
         return true;
     }
     
@@ -129,7 +127,6 @@ public:
         int bytesReceived = recv(clientSocket, (char*)buffer, sizeof(buffer), 0);
         if (bytesReceived <= 0) return "";
         
-        // Parse WebSocket frame
         bool fin = (buffer[0] & 0x80) != 0;
         int opcode = buffer[0] & 0x0F;
         bool masked = (buffer[1] & 0x80) != 0;
@@ -157,7 +154,7 @@ public:
     
     void sendMessage(const std::string& message) {
         std::vector<unsigned char> frame;
-        frame.push_back(0x81); // FIN + text frame
+        frame.push_back(0x81);
         
         if (message.length() <= 125) {
             frame.push_back(message.length());
@@ -258,7 +255,6 @@ public:
         bool first = true;
         int count = 0;
         
-        // Get installed applications from Registry (Uninstall keys)
         std::vector<std::string> regPaths = {
             "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
             "SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall"
@@ -280,9 +276,7 @@ public:
                         DWORD dataSize = 512;
                         DWORD type;
                         
-                        // Get DisplayName
                         if (RegQueryValueExA(hSubKey, "DisplayName", NULL, &type, (LPBYTE)displayName, &dataSize) == ERROR_SUCCESS) {
-                            // Skip system components and updates
                             std::string nameStr(displayName);
                             if (nameStr.find("Update for") != std::string::npos ||
                                 nameStr.find("Security Update") != std::string::npos ||
@@ -292,15 +286,12 @@ public:
                                 continue;
                             }
                             
-                            // Get Publisher
                             dataSize = 256;
                             RegQueryValueExA(hSubKey, "Publisher", NULL, &type, (LPBYTE)publisher, &dataSize);
                             
-                            // Get InstallLocation
                             dataSize = 512;
                             RegQueryValueExA(hSubKey, "InstallLocation", NULL, &type, (LPBYTE)installLocation, &dataSize);
                             
-                            // Try to find the main executable (not uninstaller)
                             std::string exePath;
                             if (strlen(installLocation) > 0) {
                                 WIN32_FIND_DATAA findData;
@@ -308,13 +299,11 @@ public:
                                 HANDLE hFind = FindFirstFileA(searchPattern.c_str(), &findData);
                                 
                                 if (hFind != INVALID_HANDLE_VALUE) {
-                                    // Look for the main executable, skip uninstallers
                                     do {
                                         std::string exeName = findData.cFileName;
                                         std::string lowerExeName = exeName;
                                         std::transform(lowerExeName.begin(), lowerExeName.end(), lowerExeName.begin(), ::tolower);
                                         
-                                        // Skip uninstaller executables
                                         if (lowerExeName.find("unins") == std::string::npos &&
                                             lowerExeName.find("uninst") == std::string::npos &&
                                             lowerExeName.find("uninstall") == std::string::npos &&
@@ -327,7 +316,6 @@ public:
                                     FindClose(hFind);
                                 }
                                 
-                                // If no exe found in root, check bin subdirectories
                                 if (exePath.empty()) {
                                     std::vector<std::string> subDirs = {"bin", "x64", "x86"};
                                     for (const auto& subDir : subDirs) {
@@ -378,7 +366,6 @@ public:
             }
         }
         
-        // Add common Windows built-in apps
         std::vector<std::pair<std::string, std::string>> commonApps = {
             {"Calculator", "calc.exe"},
             {"Notepad", "notepad.exe"},
@@ -388,7 +375,6 @@ public:
             {"Task Manager", "taskmgr.exe"},
             {"File Explorer", "explorer.exe"},
             {"Control Panel", "control.exe"},
-            {"Settings", "ms-settings:"},
             {"Character Map", "charmap.exe"},
             {"Snipping Tool", "SnippingTool.exe"},
             {"WordPad", "wordpad.exe"}
@@ -404,62 +390,7 @@ public:
         }
         
         ss << "]";
-        std::cout << "Found " << count << " applications from registry and system" << std::endl;
-        return ss.str();
-    }
-    
-    static std::string exploreApplication(const std::string& appPath) {
-        std::stringstream ss;
-        ss << "[";
-        
-        bool first = true;
-        
-        // Search for .exe files in the application directory
-        WIN32_FIND_DATAA findData;
-        std::string searchPattern = appPath + "\\*.exe";
-        HANDLE hFind = FindFirstFileA(searchPattern.c_str(), &findData);
-        
-        if (hFind != INVALID_HANDLE_VALUE) {
-            do {
-                if (!(findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
-                    if (!first) ss << ",";
-                    first = false;
-                    
-                    std::string fullPath = appPath + "\\\\" + findData.cFileName;
-                    ss << "{\"file\":\"" << findData.cFileName 
-                       << "\",\"fullPath\":\"" << fullPath << "\"}";
-                }
-            } while (FindNextFileA(hFind, &findData));
-            FindClose(hFind);
-        }
-        
-        // Also search in common subdirectories
-        std::vector<std::string> subDirs = {"", "bin", "x64", "x86"};
-        for (const auto& subDir : subDirs) {
-            std::string subPath = subDir.empty() ? appPath : appPath + "\\\\" + subDir;
-            searchPattern = subPath + "\\*.exe";
-            hFind = FindFirstFileA(searchPattern.c_str(), &findData);
-            
-            if (hFind != INVALID_HANDLE_VALUE) {
-                do {
-                    if (!(findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
-                        if (!first) ss << ",";
-                        first = false;
-                        
-                        std::string fullPath = subPath + "\\\\" + findData.cFileName;
-                        // Avoid duplicates
-                        std::string jsonStr = "{\"file\":\"" + std::string(findData.cFileName) 
-                                            + "\",\"fullPath\":\"" + fullPath + "\"}";
-                        if (ss.str().find(jsonStr) == std::string::npos) {
-                            ss << jsonStr;
-                        }
-                    }
-                } while (FindNextFileA(hFind, &findData));
-                FindClose(hFind);
-            }
-        }
-        
-        ss << "]";
+        std::cout << "Found " << count << " applications" << std::endl;
         return ss.str();
     }
 };
@@ -483,10 +414,6 @@ void handleClient(WebSocketServer& server) {
         else if (message.find("list_applications") != std::string::npos) {
             response = ProcessManager::listApplications();
         }
-        else if (message.find("explore_app:") != std::string::npos) {
-            std::string path = message.substr(12);
-            response = ProcessManager::exploreApplication(path);
-        }
         else if (message.find("start_process:") != std::string::npos) {
             std::string path = message.substr(14);
             response = ProcessManager::startProcess(path);
@@ -506,33 +433,50 @@ void handleClient(WebSocketServer& server) {
 int main() {
     WebSocketServer server;
     
+    char hostName[256];
+    gethostname(hostName, sizeof(hostName));
+    struct hostent* host = gethostbyname(hostName);
+    
+    std::cout << "==================================================" << std::endl;
+    std::cout << "   Windows Process Manager WebSocket Server" << std::endl;
+    std::cout << "==================================================" << std::endl;
+    std::cout << "Server Name: " << hostName << std::endl;
+    
+    if (host != NULL) {
+        for (int i = 0; host->h_addr_list[i] != NULL; i++) {
+            struct in_addr addr;
+            memcpy(&addr, host->h_addr_list[i], sizeof(struct in_addr));
+            std::cout << "IP Address " << (i+1) << ": " << inet_ntoa(addr) << std::endl;
+        }
+    }
+    
+    std::cout << "Port: 8080" << std::endl;
+    std::cout << "==================================================" << std::endl;
+    
     if (!server.start(8080)) {
-        std::cerr << "Failed to start server" << std::endl;
+        std::cerr << "Failed to start server on port 8080" << std::endl;
+        std::cerr << "Make sure:" << std::endl;
+        std::cerr << "  1. Port 8080 is not in use" << std::endl;
+        std::cerr << "  2. Firewall allows connections on port 8080" << std::endl;
+        std::cerr << "  3. Run as Administrator if needed" << std::endl;
         return 1;
     }
     
-    std::cout << "Server started. Commands:" << std::endl;
-    std::cout << "  Press Enter to accept next client" << std::endl;
-    std::cout << "  Type 'quit' to exit" << std::endl;
+    std::cout << "Server listening on 0.0.0.0:8080" << std::endl;
+    std::cout << "Clients can connect from any device on the LAN" << std::endl;
+    std::cout << "Waiting for connections..." << std::endl;
+    std::cout << "==================================================" << std::endl;
+    std::cout << std::endl;
     
     while (true) {
-        std::string input;
-        std::cout << "\nWaiting for command (press Enter to accept client, 'quit' to exit): ";
-        std::getline(std::cin, input);
-        
-        if (input == "quit" || input == "exit") {
-            break;
-        }
-        
-        std::cout << "Accepting client connection..." << std::endl;
         if (server.acceptClient()) {
             handleClient(server);
         } else {
-            std::cerr << "Failed to accept client" << std::endl;
+            std::cerr << "Failed to accept client, waiting..." << std::endl;
+            Sleep(1000);
         }
     }
     
     server.close();
-    std::cout << "Server shutdown" << std::endl;
     return 0;
 }

@@ -113,8 +113,28 @@
     <div class="container">
         <h2>Connection</h2>
         <div id="status" class="status disconnected">Disconnected</div>
+        <div style="margin: 10px 0;">
+            <label for="serverIp" style="display: block; margin-bottom: 5px; font-weight: bold;">Server IP Address:</label>
+            <input type="text" id="serverIp" placeholder="192.168.1.100" style="width: 200px; padding: 8px; margin-right: 10px;">
+            <label for="serverPort" style="font-weight: bold;">Port:</label>
+            <input type="text" id="serverPort" value="8080" style="width: 80px; padding: 8px;">
+            <button onclick="scanNetwork()" style="background: #28a745; margin-left: 10px;">🔍 Scan Network</button>
+        </div>
+        <div id="scanResults" style="display: none; background: #f8f9fa; border: 1px solid #ddd; padding: 10px; margin: 10px 0; border-radius: 4px;">
+            <strong>Available Servers:</strong>
+            <div id="serverList" style="margin-top: 10px;"></div>
+        </div>
         <button id="connectBtn" onclick="connect()">Connect to Server</button>
         <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+        <div style="background: #e7f3ff; border: 1px solid #2196F3; padding: 10px; margin: 10px 0; border-radius: 4px; font-size: 13px;">
+            ℹ️ <strong>How to connect:</strong>
+            <ol style="margin: 5px 0 0 20px; padding: 0;">
+                <li>Click "🔍 Scan Network" to find available servers automatically</li>
+                <li>Or manually enter the server IP address shown by websocket_server.exe</li>
+                <li>Click "Connect to Server"</li>
+                <li>Make sure both devices are on the same network</li>
+            </ol>
+        </div>
     </div>
 
     <div class="container">
@@ -158,13 +178,13 @@
             output.scrollTop = output.scrollHeight;
         }
 
-        function updateStatus(connected) {
+        function updateStatus(connected, url) {
             const status = document.getElementById('status');
             const connectBtn = document.getElementById('connectBtn');
             const disconnectBtn = document.getElementById('disconnectBtn');
             
             if (connected) {
-                status.textContent = 'Connected to ws://localhost:8080';
+                status.textContent = 'Connected to ' + url;
                 status.className = 'status connected';
                 connectBtn.disabled = true;
                 disconnectBtn.disabled = false;
@@ -179,12 +199,22 @@
         function connect() {
             if (ws) return;
             
-            log('Connecting to ws://localhost:8080...');
-            ws = new WebSocket('ws://localhost:8080');
+            const serverIp = document.getElementById('serverIp').value.trim();
+            const serverPort = document.getElementById('serverPort').value.trim();
+            
+            if (!serverIp) {
+                alert('Please enter the server IP address!');
+                document.getElementById('serverIp').focus();
+                return;
+            }
+            
+            const wsUrl = `ws://${serverIp}:${serverPort}`;
+            log(`Connecting to ${wsUrl}...`);
+            ws = new WebSocket(wsUrl);
             
             ws.onopen = () => {
                 log('Connected successfully!', 'success');
-                updateStatus(true);
+                updateStatus(true, wsUrl);
             };
             
             ws.onmessage = (event) => {
@@ -199,7 +229,7 @@
             };
             
             ws.onerror = (error) => {
-                log('WebSocket error occurred', 'error');
+                log('WebSocket error occurred - Check if server is running and IP is correct', 'error');
             };
             
             ws.onclose = () => {
@@ -418,10 +448,151 @@
             document.getElementById('output').innerHTML = '';
         }
 
-        // Auto-connect on load
+        // Remove auto-connect on load
         window.onload = () => {
-            log('Page loaded. Click "Connect to Server" to begin.');
+            log('Page loaded. Enter server IP address and click "Connect to Server".');
         };
+
+        // Network scanning function
+        async function scanNetwork() {
+            const scanResults = document.getElementById('scanResults');
+            const serverList = document.getElementById('serverList');
+            const port = document.getElementById('serverPort').value || '8080';
+            
+            scanResults.style.display = 'block';
+            serverList.innerHTML = '<p style="color: #666;">🔍 Scanning network for servers on port ' + port + '... This may take a moment.</p>';
+            log('Starting network scan on port ' + port + '...');
+            
+            // Get common local IP ranges
+            const ipRanges = [];
+            
+            // Try to detect current network from WebRTC
+            try {
+                const pc = new RTCPeerConnection({iceServers: []});
+                pc.createDataChannel('');
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                
+                await new Promise(resolve => {
+                    pc.onicecandidate = (event) => {
+                        if (event.candidate) {
+                            const candidate = event.candidate.candidate;
+                            const ipMatch = candidate.match(/(\d+\.\d+\.\d+)\.\d+/);
+                            if (ipMatch && ipMatch[1]) {
+                                const subnet = ipMatch[1];
+                                if (!ipRanges.includes(subnet)) {
+                                    ipRanges.push(subnet);
+                                    log('Detected subnet: ' + subnet + '.x');
+                                }
+                            }
+                        } else {
+                            resolve();
+                        }
+                    };
+                    setTimeout(resolve, 2000); // Timeout after 2 seconds
+                });
+                pc.close();
+            } catch (e) {
+                log('WebRTC detection failed, using common ranges', 'error');
+            }
+            
+            // Add common private IP ranges if none detected
+            if (ipRanges.length === 0) {
+                ipRanges.push('192.168.1', '192.168.0', '192.168.2', '10.0.0', '172.16.0');
+                log('Using default IP ranges: ' + ipRanges.join(', '));
+            }
+            
+            // Also check localhost
+            ipRanges.push('127.0.0');
+            
+            const foundServers = [];
+            const promises = [];
+            let scannedCount = 0;
+            let totalIps = 0;
+            
+            // Scan each subnet
+            for (const subnet of ipRanges) {
+                // Scan common IPs: .1, .100-110, .150-160, .200-210
+                const ipsToScan = [
+                    1, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110,
+                    150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160,
+                    200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210
+                ];
+                
+                totalIps += ipsToScan.length;
+                
+                for (const lastOctet of ipsToScan) {
+                    const ip = `${subnet}.${lastOctet}`;
+                    
+                    promises.push(
+                        (async () => {
+                            try {
+                                log(`Trying ${ip}:${port}...`);
+                                const testWs = new WebSocket(`ws://${ip}:${port}`);
+                                
+                                await new Promise((resolve, reject) => {
+                                    const timeout = setTimeout(() => {
+                                        testWs.close();
+                                        reject(new Error('timeout'));
+                                    }, 2000); // Increased to 2 seconds
+                                    
+                                    testWs.onopen = () => {
+                                        clearTimeout(timeout);
+                                        foundServers.push(ip);
+                                        log(`✅ Found server at ${ip}:${port}`, 'success');
+                                        testWs.close();
+                                        resolve();
+                                    };
+                                    
+                                    testWs.onerror = () => {
+                                        clearTimeout(timeout);
+                                        testWs.close();
+                                        reject(new Error('connection failed'));
+                                    };
+                                });
+                            } catch (e) {
+                                // Connection failed, ignore
+                            } finally {
+                                scannedCount++;
+                                if (scannedCount % 10 === 0) {
+                                    serverList.innerHTML = `<p style="color: #666;">🔍 Scanning... ${scannedCount}/${totalIps} IPs checked</p>`;
+                                }
+                            }
+                        })()
+                    );
+                }
+            }
+            
+            // Wait for all scans to complete
+            await Promise.allSettled(promises);
+            
+            if (foundServers.length > 0) {
+                let html = '<p style="color: #28a745; font-weight: bold;">✅ Found ' + foundServers.length + ' server(s):</p>';
+                foundServers.forEach(ip => {
+                    html += `<div style="padding: 8px; margin: 5px 0; background: white; border: 1px solid #ddd; border-radius: 4px;">
+                        <strong>${ip}:${port}</strong>
+                        <button onclick="selectServer('${ip}')" style="float: right; padding: 5px 15px;">Select</button>
+                    </div>`;
+                });
+                serverList.innerHTML = html;
+                log(`Scan complete: Found ${foundServers.length} server(s)`, 'success');
+            } else {
+                serverList.innerHTML = `<p style="color: #dc3545;">❌ No servers found on ${totalIps} IPs checked.</p>
+                    <p style="color: #666; font-size: 13px;">Troubleshooting:</p>
+                    <ul style="font-size: 13px; color: #666;">
+                        <li>Make sure websocket_server.exe is running</li>
+                        <li>Check Windows Firewall (allow port ${port})</li>
+                        <li>Try manually entering the IP shown by the server</li>
+                        <li>Check Console Output below for scan details</li>
+                    </ul>`;
+                log('Scan complete: No servers found. Check firewall and server status.', 'error');
+            }
+        }
+
+        function selectServer(ip) {
+            document.getElementById('serverIp').value = ip;
+            log('Selected server: ' + ip);
+        }
     </script>
 </body>
 </html>
