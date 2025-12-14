@@ -453,7 +453,7 @@
             log('Page loaded. Enter server IP address and click "Connect to Server".');
         };
 
-        // Network scanning function
+        // Improved network scanning function with better detection
         async function scanNetwork() {
             const scanResults = document.getElementById('scanResults');
             const serverList = document.getElementById('serverList');
@@ -461,62 +461,130 @@
             
             scanResults.style.display = 'block';
             serverList.innerHTML = '<p style="color: #666;">🔍 Scanning network for servers on port ' + port + '... This may take a moment.</p>';
-            log('Starting network scan on port ' + port + '...');
+            log('Starting improved network scan on port ' + port + '...');
             
-            // Get common local IP ranges
+            // Get local IP ranges with improved detection
             const ipRanges = [];
             
-            // Try to detect current network from WebRTC
+            // Try to detect current network from WebRTC (more reliable method)
             try {
                 const pc = new RTCPeerConnection({iceServers: []});
                 pc.createDataChannel('');
                 const offer = await pc.createOffer();
                 await pc.setLocalDescription(offer);
                 
+                const detectedIPs = new Set();
+                
                 await new Promise(resolve => {
                     pc.onicecandidate = (event) => {
                         if (event.candidate) {
                             const candidate = event.candidate.candidate;
-                            const ipMatch = candidate.match(/(\d+\.\d+\.\d+)\.\d+/);
-                            if (ipMatch && ipMatch[1]) {
-                                const subnet = ipMatch[1];
-                                if (!ipRanges.includes(subnet)) {
-                                    ipRanges.push(subnet);
-                                    log('Detected subnet: ' + subnet + '.x');
+                            // Extract IP from various ICE candidate formats
+                            const ipMatches = [
+                                candidate.match(/candidate:\S+ \S+ \S+ \S+ ([\d.]+) /),
+                                candidate.match(/(\d+\.\d+\.\d+\.\d+)/)
+                            ];
+                            
+                            for (const match of ipMatches) {
+                                if (match && match[1]) {
+                                    const fullIP = match[1];
+                                    const subnet = fullIP.substring(0, fullIP.lastIndexOf('.'));
+                                    
+                                    // Skip loopback and link-local
+                                    if (!fullIP.startsWith('127.') && !fullIP.startsWith('169.254.')) {
+                                        detectedIPs.add(fullIP);
+                                        if (!ipRanges.includes(subnet)) {
+                                            ipRanges.push(subnet);
+                                            log('🔍 Detected subnet: ' + subnet + '.x');
+                                        }
+                                        break;
+                                    }
                                 }
                             }
                         } else {
                             resolve();
                         }
                     };
-                    setTimeout(resolve, 2000); // Timeout after 2 seconds
+                    setTimeout(resolve, 3000); // Increased timeout for better detection
                 });
                 pc.close();
+                
+                if (detectedIPs.size > 0) {
+                    log('✅ Detected ' + detectedIPs.size + ' local IP(s)');
+                }
             } catch (e) {
-                log('WebRTC detection failed, using common ranges', 'error');
+                log('WebRTC detection had issues: ' + e.message, 'error');
             }
             
-            // Add common private IP ranges if none detected
-            if (ipRanges.length === 0) {
-                ipRanges.push('192.168.1', '192.168.0', '192.168.2', '10.0.0', '172.16.0');
-                log('Using default IP ranges: ' + ipRanges.join(', '));
+            // Add common private IP ranges as fallback
+            const commonRanges = ['192.168.1', '192.168.0', '192.168.2', '10.0.0', '10.0.1', '172.16.0'];
+            for (const range of commonRanges) {
+                if (!ipRanges.includes(range)) {
+                    ipRanges.push(range);
+                }
             }
             
             // Also check localhost
             ipRanges.push('127.0.0');
             
+            log('Scanning subnets: ' + ipRanges.join(', '));
+            
             const foundServers = [];
             const promises = [];
             let scannedCount = 0;
             let totalIps = 0;
+            let activeScans = 0;
+            const maxConcurrent = 20; // Limit concurrent scans for better performance
+            
+            // Helper function to test a single IP
+            const testIP = (ip) => {
+                return new Promise((resolve) => {
+                    try {
+                        const testWs = new WebSocket(`ws://${ip}:${port}`);
+                        let completed = false;
+                        
+                        const timeout = setTimeout(() => {
+                            if (!completed) {
+                                completed = true;
+                                testWs.close();
+                                resolve(false);
+                            }
+                        }, 3000); // Longer timeout (3 seconds) for slower networks
+                        
+                        testWs.onopen = () => {
+                            if (!completed) {
+                                completed = true;
+                                clearTimeout(timeout);
+                                foundServers.push(ip);
+                                log(`✅ Found server at ${ip}:${port}`, 'success');
+                                testWs.close();
+                                resolve(true);
+                            }
+                        };
+                        
+                        testWs.onerror = () => {
+                            if (!completed) {
+                                completed = true;
+                                clearTimeout(timeout);
+                                testWs.close();
+                                resolve(false);
+                            }
+                        };
+                    } catch (e) {
+                        resolve(false);
+                    }
+                });
+            };
             
             // Scan each subnet
             for (const subnet of ipRanges) {
-                // Scan common IPs: .1, .100-110, .150-160, .200-210
+                // Scan more comprehensive range of IPs
                 const ipsToScan = [
-                    1, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110,
+                    1, 2, 3, 4, 5,  // Gateway and early IPs
+                    100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110,
                     150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160,
-                    200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210
+                    200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210,
+                    254 // Broadcast address area
                 ];
                 
                 totalIps += ipsToScan.length;
@@ -526,42 +594,28 @@
                     
                     promises.push(
                         (async () => {
-                            try {
-                                log(`Trying ${ip}:${port}...`);
-                                const testWs = new WebSocket(`ws://${ip}:${port}`);
-                                
-                                await new Promise((resolve, reject) => {
-                                    const timeout = setTimeout(() => {
-                                        testWs.close();
-                                        reject(new Error('timeout'));
-                                    }, 2000); // Increased to 2 seconds
-                                    
-                                    testWs.onopen = () => {
-                                        clearTimeout(timeout);
-                                        foundServers.push(ip);
-                                        log(`✅ Found server at ${ip}:${port}`, 'success');
-                                        testWs.close();
-                                        resolve();
-                                    };
-                                    
-                                    testWs.onerror = () => {
-                                        clearTimeout(timeout);
-                                        testWs.close();
-                                        reject(new Error('connection failed'));
-                                    };
-                                });
-                            } catch (e) {
-                                // Connection failed, ignore
-                            } finally {
-                                scannedCount++;
-                                if (scannedCount % 10 === 0) {
-                                    serverList.innerHTML = `<p style="color: #666;">🔍 Scanning... ${scannedCount}/${totalIps} IPs checked</p>`;
-                                }
+                            // Throttle concurrent connections
+                            while (activeScans >= maxConcurrent) {
+                                await new Promise(r => setTimeout(r, 10));
+                            }
+                            activeScans++;
+                            
+                            await testIP(ip);
+                            
+                            activeScans--;
+                            scannedCount++;
+                            
+                            // Update progress every 5 IPs
+                            if (scannedCount % 5 === 0) {
+                                const percent = Math.round((scannedCount / totalIps) * 100);
+                                serverList.innerHTML = `<p style="color: #666;">🔍 Scanning... ${scannedCount}/${totalIps} IPs checked (${percent}%)<br/>Found: ${foundServers.length} server(s)</p>`;
                             }
                         })()
                     );
                 }
             }
+            
+            log('Testing ' + totalIps + ' IP addresses across ' + ipRanges.length + ' subnets...');
             
             // Wait for all scans to complete
             await Promise.allSettled(promises);
@@ -569,23 +623,25 @@
             if (foundServers.length > 0) {
                 let html = '<p style="color: #28a745; font-weight: bold;">✅ Found ' + foundServers.length + ' server(s):</p>';
                 foundServers.forEach(ip => {
-                    html += `<div style="padding: 8px; margin: 5px 0; background: white; border: 1px solid #ddd; border-radius: 4px;">
-                        <strong>${ip}:${port}</strong>
-                        <button onclick="selectServer('${ip}')" style="float: right; padding: 5px 15px;">Select</button>
+                    html += `<div style="padding: 10px; margin: 8px 0; background: white; border: 2px solid #28a745; border-radius: 4px;">
+                        <strong style="font-size: 16px;">${ip}:${port}</strong>
+                        <button onclick="selectServer('${ip}')" style="float: right; padding: 8px 20px; background: #28a745;">✓ Select</button>
                     </div>`;
                 });
                 serverList.innerHTML = html;
-                log(`Scan complete: Found ${foundServers.length} server(s)`, 'success');
+                log(`✅ Scan complete: Found ${foundServers.length} server(s)`, 'success');
             } else {
-                serverList.innerHTML = `<p style="color: #dc3545;">❌ No servers found on ${totalIps} IPs checked.</p>
-                    <p style="color: #666; font-size: 13px;">Troubleshooting:</p>
-                    <ul style="font-size: 13px; color: #666;">
-                        <li>Make sure websocket_server.exe is running</li>
-                        <li>Check Windows Firewall (allow port ${port})</li>
-                        <li>Try manually entering the IP shown by the server</li>
-                        <li>Check Console Output below for scan details</li>
-                    </ul>`;
-                log('Scan complete: No servers found. Check firewall and server status.', 'error');
+                serverList.innerHTML = `<p style="color: #dc3545;"><strong>❌ No servers found</strong></p>
+                    <p style="color: #666; font-size: 13px;">Scanned ${totalIps} IP addresses but found no WebSocket servers.</p>
+                    <p style="color: #666; font-size: 13px; font-weight: bold;">Troubleshooting steps:</p>
+                    <ol style="font-size: 13px; color: #666; margin: 10px 0; padding-left: 20px;">
+                        <li><strong>Is the server running?</strong><br/>Check that websocket_server.exe is running on the other device</li>
+                        <li><strong>Windows Firewall</strong><br/>Allow port ${port} through Windows Firewall on the server machine</li>
+                        <li><strong>Manual entry</strong><br/>Run <code style="background: #f0f0f0; padding: 2px 6px; border-radius: 3px;">ipconfig</code> on the server and note the IPv4 address, then enter it manually above</li>
+                        <li><strong>Network connectivity</strong><br/>Verify both devices are on the same WiFi network</li>
+                        <li><strong>Try localhost first</strong><br/>If testing on same machine, try 127.0.0.1</li>
+                    </ol>`;
+                log('Scan complete: No servers found. See troubleshooting steps above.', 'error');
             }
         }
 

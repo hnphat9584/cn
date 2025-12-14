@@ -11,8 +11,138 @@
 #include <algorithm>
 #include <cstdint>
 #include <cctype>
+#include <thread>
+#include <fstream>
+#include <filesystem>
 
 #pragma comment(lib, "ws2_32.lib")
+
+namespace fs = std::filesystem;
+
+// Simple HTTP Server for serving the client HTML
+class HTTPServer {
+private:
+    SOCKET serverSocket;
+    bool running;
+    
+public:
+    HTTPServer() : serverSocket(INVALID_SOCKET), running(false) {}
+    
+    bool start(int port) {
+        WSADATA wsaData;
+        if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) return false;
+        
+        serverSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (serverSocket == INVALID_SOCKET) return false;
+        
+        // Allow address reuse
+        int reuse = 1;
+        setsockopt(serverSocket, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse));
+        
+        sockaddr_in addr;
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = INADDR_ANY;
+        addr.sin_port = htons(port);
+        
+        if (bind(serverSocket, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) return false;
+        if (listen(serverSocket, SOMAXCONN) == SOCKET_ERROR) return false;
+        
+        running = true;
+        return true;
+    }
+    
+    void handleConnections() {
+        while (running) {
+            SOCKET clientSocket = accept(serverSocket, NULL, NULL);
+            if (clientSocket == INVALID_SOCKET) continue;
+            
+            // Handle in a separate thread
+            std::thread(&HTTPServer::handleClient, this, clientSocket).detach();
+        }
+    }
+    
+    void handleClient(SOCKET clientSocket) {
+        char buffer[4096] = {0};
+        int bytesReceived = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
+        
+        if (bytesReceived > 0) {
+            buffer[bytesReceived] = '\0';
+            std::string request(buffer);
+            
+            // Parse HTTP request
+            std::string method, path;
+            std::istringstream iss(request);
+            iss >> method >> path;
+            
+            // Default to index.html if root is requested
+            if (path == "/") path = "/index.html";
+            
+            // Remove leading slash for file path
+            std::string filePath = "." + path;
+            
+            // Only serve HTML files
+            if (path.find("..") == std::string::npos && 
+                (path.find(".html") != std::string::npos || path.find(".htm") != std::string::npos)) {
+                
+                // Try to read the file
+                std::ifstream file(filePath, std::ios::binary);
+                if (file.is_open()) {
+                    // File found
+                    std::string content((std::istreambuf_iterator<char>(file)),
+                                      std::istreambuf_iterator<char>());
+                    file.close();
+                    
+                    std::string response = 
+                        "HTTP/1.1 200 OK\r\n"
+                        "Content-Type: text/html; charset=utf-8\r\n"
+                        "Content-Length: " + std::to_string(content.length()) + "\r\n"
+                        "Cache-Control: no-store, no-cache, must-revalidate, max-age=0\r\n"
+                        "Pragma: no-cache\r\n"
+                        "Expires: 0\r\n"
+                        "Connection: close\r\n"
+                        "\r\n" + content;
+                    
+                    send(clientSocket, response.c_str(), response.length(), 0);
+                } else {
+                    // File not found
+                    std::string response = 
+                        "HTTP/1.1 404 Not Found\r\n"
+                        "Content-Type: text/html\r\n"
+                        "Content-Length: 156\r\n"
+                        "Connection: close\r\n"
+                        "\r\n"
+                        "<html><head><title>404 Not Found</title></head>"
+                        "<body><h1>404 Not Found</h1>"
+                        "<p>The requested file was not found.</p>"
+                        "<p>Make sure index.html is in the same directory as websocket_server.exe</p>"
+                        "</body></html>";
+                    
+                    send(clientSocket, response.c_str(), response.length(), 0);
+                }
+            } else {
+                // Invalid request
+                std::string response = 
+                    "HTTP/1.1 403 Forbidden\r\n"
+                    "Content-Type: text/html\r\n"
+                    "Content-Length: 116\r\n"
+                    "Connection: close\r\n"
+                    "\r\n"
+                    "<html><head><title>403 Forbidden</title></head>"
+                    "<body><h1>403 Forbidden</h1>"
+                    "<p>Only HTML files can be served.</p></body></html>";
+                
+                send(clientSocket, response.c_str(), response.length(), 0);
+            }
+        }
+        
+        closesocket(clientSocket);
+    }
+    
+    void stop() {
+        running = false;
+        if (serverSocket != INVALID_SOCKET) closesocket(serverSocket);
+    }
+};
 
 // Simple WebSocket implementation
 class WebSocketServer {
@@ -431,30 +561,63 @@ void handleClient(WebSocketServer& server) {
 }
 
 int main() {
-    WebSocketServer server;
+    WebSocketServer wsServer;
+    HTTPServer httpServer;
     
+    // Get computer name from Windows API
+    char computerName[MAX_COMPUTERNAME_LENGTH + 1];
+    DWORD size = sizeof(computerName);
+    if (GetComputerNameA(computerName, &size)) {
+        std::cout << "==================================================" << std::endl;
+        std::cout << "   Windows Process Manager - WebSocket Server" << std::endl;
+        std::cout << "==================================================" << std::endl;
+        std::cout << "Computer Name: " << computerName << std::endl;
+    } else {
+        std::cout << "==================================================" << std::endl;
+        std::cout << "   Windows Process Manager - WebSocket Server" << std::endl;
+        std::cout << "==================================================" << std::endl;
+        std::cout << "Computer Name: (Unknown)" << std::endl;
+    }
+    
+    // Get IP addresses
     char hostName[256];
-    gethostname(hostName, sizeof(hostName));
-    struct hostent* host = gethostbyname(hostName);
-    
-    std::cout << "==================================================" << std::endl;
-    std::cout << "   Windows Process Manager WebSocket Server" << std::endl;
-    std::cout << "==================================================" << std::endl;
-    std::cout << "Server Name: " << hostName << std::endl;
-    
-    if (host != NULL) {
-        for (int i = 0; host->h_addr_list[i] != NULL; i++) {
-            struct in_addr addr;
-            memcpy(&addr, host->h_addr_list[i], sizeof(struct in_addr));
-            std::cout << "IP Address " << (i+1) << ": " << inet_ntoa(addr) << std::endl;
+    bool foundIP = false;
+    if (gethostname(hostName, sizeof(hostName)) == 0) {
+        struct hostent* host = gethostbyname(hostName);
+        if (host != NULL) {
+            for (int i = 0; host->h_addr_list[i] != NULL; i++) {
+                struct in_addr addr;
+                memcpy(&addr, host->h_addr_list[i], sizeof(struct in_addr));
+                std::string ipStr = inet_ntoa(addr);
+                // Skip loopback addresses
+                if (ipStr != "127.0.0.1") {
+                    std::cout << "IP Address " << (i+1) << ": " << ipStr << std::endl;
+                    foundIP = true;
+                }
+            }
         }
     }
     
-    std::cout << "Port: 8080" << std::endl;
+    if (!foundIP) {
+        std::cout << "IP Address: Unable to detect (check with 'ipconfig')" << std::endl;
+    }
+    
+    std::cout << "\n🔌 WebSocket Port: 8080" << std::endl;
+    std::cout << "🌐 HTTP Port: 8000" << std::endl;
     std::cout << "==================================================" << std::endl;
     
-    if (!server.start(8080)) {
-        std::cerr << "Failed to start server on port 8080" << std::endl;
+    // Start HTTP Server
+    if (!httpServer.start(8000)) {
+        std::cerr << "\n❌ Failed to start HTTP server on port 8000" << std::endl;
+        std::cerr << "Make sure port 8000 is not in use" << std::endl;
+        return 1;
+    }
+    std::cout << "\n✓ HTTP server listening on 0.0.0.0:8000" << std::endl;
+    std::cout << "  Open browser to: http://localhost:8000" << std::endl;
+    
+    // Start WebSocket Server
+    if (!wsServer.start(8080)) {
+        std::cerr << "❌ Failed to start WebSocket server on port 8080" << std::endl;
         std::cerr << "Make sure:" << std::endl;
         std::cerr << "  1. Port 8080 is not in use" << std::endl;
         std::cerr << "  2. Firewall allows connections on port 8080" << std::endl;
@@ -462,21 +625,30 @@ int main() {
         return 1;
     }
     
-    std::cout << "Server listening on 0.0.0.0:8080" << std::endl;
-    std::cout << "Clients can connect from any device on the LAN" << std::endl;
-    std::cout << "Waiting for connections..." << std::endl;
+    std::cout << "✓ WebSocket server listening on 0.0.0.0:8080" << std::endl;
+    std::cout << "\n==================================================" << std::endl;
+    std::cout << "📋 IMPORTANT:" << std::endl;
+    std::cout << "  1. index.html must be in the same folder as this .exe" << std::endl;
+    std::cout << "  2. Make sure Windows Firewall allows port 8080" << std::endl;
+    std::cout << "  3. On client device, navigate to: http://<server-ip>:8000" << std::endl;
     std::cout << "==================================================" << std::endl;
-    std::cout << std::endl;
+    std::cout << "\nWaiting for connections...\n" << std::endl;
     
+    // Start HTTP server in a separate thread
+    std::thread httpThread(&HTTPServer::handleConnections, &httpServer);
+    httpThread.detach();
+    
+    // Handle WebSocket connections (blocking)
     while (true) {
-        if (server.acceptClient()) {
-            handleClient(server);
+        if (wsServer.acceptClient()) {
+            handleClient(wsServer);
         } else {
-            std::cerr << "Failed to accept client, waiting..." << std::endl;
+            std::cerr << "Failed to accept WebSocket client, waiting..." << std::endl;
             Sleep(1000);
         }
     }
     
-    server.close();
+    wsServer.close();
+    httpServer.stop();
     return 0;
 }
