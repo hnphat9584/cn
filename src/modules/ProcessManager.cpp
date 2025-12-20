@@ -22,18 +22,20 @@ std::string ProcessManager::listProcesses() {
     HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snapshot == INVALID_HANDLE_VALUE) return "[]";
     
-    PROCESSENTRY32 pe32;
-    pe32.dwSize = sizeof(PROCESSENTRY32);
+    PROCESSENTRY32W pe32;
+    pe32.dwSize = sizeof(pe32);
     
     bool first = true;
-    if (Process32First(snapshot, &pe32)) {
+    if (Process32FirstW(snapshot, &pe32)) {
         do {
             if (!first) ss << ",";
             first = false;
-            
-            ss << "{\"pid\":" << pe32.th32ProcessID 
-                << ",\"name\":\"" << escapeJson(pe32.szExeFile) << "\"}";
-        } while (Process32Next(snapshot, &pe32));
+
+            std::string name = utf8_from_wstring(pe32.szExeFile);
+
+            ss << "{\"pid\":" << "pe32.th32ProcessID" 
+                << ",\"name\":\"" << "escapeJson(name)" << "\"}";
+        } while (Process32NextW(snapshot, &pe32));
     }
     
     CloseHandle(snapshot);
@@ -74,92 +76,138 @@ std::string ProcessManager::listApplications() {
     ss << "[";
     bool first = true;
     int count = 0;
-    
-    std::vector<std::string> regPaths = {
-        "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
-        "SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall"
+
+    std::vector<std::wstring> regPaths = {
+        L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
+        L"SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall"
     };
-    
+
     for (const auto& regPath : regPaths) {
         HKEY hKey;
-        if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, regPath.c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
-            DWORD index = 0;
-            char subKeyName[256];
-            DWORD subKeyLen = 256;
-            
-            while (RegEnumKeyExA(hKey, index++, subKeyName, &subKeyLen, NULL, NULL, NULL, NULL) == ERROR_SUCCESS) {
-                HKEY hSubKey;
-                if (RegOpenKeyExA(hKey, subKeyName, 0, KEY_READ, &hSubKey) == ERROR_SUCCESS) {
-                    char displayName[512] = {0};
-                    char installLocation[512] = {0};
-                    char publisher[256] = {0};
-                    DWORD dataSize = 512;
-                    DWORD type;
-                    
-                    if (RegQueryValueExA(hSubKey, "DisplayName", NULL, &type, (LPBYTE)displayName, &dataSize) == ERROR_SUCCESS) {
-                        std::string nameStr(displayName);
-                        if (nameStr.find("Update for") != std::string::npos ||
-                            nameStr.find("Security Update") != std::string::npos ||
-                            nameStr.find("KB") != std::string::npos) {
-                            RegCloseKey(hSubKey);
-                            subKeyLen = 256;
-                            continue;
-                        }
-                        
-                        dataSize = 256;
-                        RegQueryValueExA(hSubKey, "Publisher", NULL, &type, (LPBYTE)publisher, &dataSize);
-                        
-                        dataSize = 512;
-                        RegQueryValueExA(hSubKey, "InstallLocation", NULL, &type, (LPBYTE)installLocation, &dataSize);
-                        
-                        std::string exePath;
-                        if (strlen(installLocation) > 0) {
-                            WIN32_FIND_DATAA findData;
-                            std::string searchPattern = std::string(installLocation) + "\\*.exe";
-                            HANDLE hFind = FindFirstFileA(searchPattern.c_str(), &findData);
-                            
-                            if (hFind != INVALID_HANDLE_VALUE) {
-                                do {
-                                    std::string exeName = findData.cFileName;
-                                    std::string lowerExeName = exeName;
-                                    std::transform(lowerExeName.begin(), lowerExeName.end(), lowerExeName.begin(), ::tolower);
-                                    
-                                    if (lowerExeName.find("unins") == std::string::npos &&
-                                        lowerExeName.find("uninst") == std::string::npos &&
-                                        lowerExeName.find("uninstall") == std::string::npos &&
-                                        lowerExeName.find("setup") == std::string::npos &&
-                                        lowerExeName.find("installer") == std::string::npos) {
-                                        exePath = std::string(installLocation) + "\\" + exeName;
-                                        break;
-                                    }
-                                } while (FindNextFileA(hFind, &findData));
-                                FindClose(hFind);
-                            }
-                        }
-                        
-                        if (!first) ss << ",";
-                        first = false;
-                        
-                        ss << "{\"name\":\"" << escapeJson(displayName);
-                        if (strlen(publisher) > 0) {
-                            ss << "\",\"publisher\":\"" << escapeJson(publisher);
-                        }
-                        ss << "\",\"exe\":\"" << (exePath.empty() ? "N/A" : escapeJson(exePath))
-                            << "\",\"path\":\"" << (exePath.empty() ? escapeJson(installLocation) : escapeJson(exePath)) << "\"}";
-                        
-                        count++;
-                        if (count >= 150) break;
-                    }
-                    RegCloseKey(hSubKey);
-                }
-                subKeyLen = 256;
-                if (count >= 150) break;
+        if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, regPath.c_str(), 0, KEY_READ, &hKey) != ERROR_SUCCESS)
+            continue;
+
+        DWORD index = 0;
+        wchar_t subKeyName[256];
+        DWORD subKeyLen;
+
+        while (true) {
+            subKeyLen = 256;
+            if (RegEnumKeyExW(hKey, index++, subKeyName, &subKeyLen, NULL, NULL, NULL, NULL) != ERROR_SUCCESS)
+                break;
+
+            HKEY hSubKey;
+            if (RegOpenKeyExW(hKey, subKeyName, 0, KEY_READ, &hSubKey) != ERROR_SUCCESS)
+                continue;
+
+            wchar_t displayNameW[512] = {};
+            wchar_t installLocationW[512] = {};
+            wchar_t publisherW[256] = {};
+            DWORD type, size;
+
+            size = sizeof(displayNameW);
+            if (RegQueryValueExW(hSubKey, L"DisplayName", NULL, &type, (LPBYTE)displayNameW, &size) != ERROR_SUCCESS) {
+                RegCloseKey(hSubKey);
+                continue;
             }
-            RegCloseKey(hKey);
-            if (count >= 150) break;
+
+            std::wstring displayNameStr(displayNameW);
+            if (displayNameStr.find(L"Update for") != std::wstring::npos ||
+                displayNameStr.find(L"Security Update") != std::wstring::npos ||
+                displayNameStr.find(L"KB") != std::wstring::npos) {
+                RegCloseKey(hSubKey);
+                continue;
+            }
+
+            size = sizeof(publisherW);
+            RegQueryValueExW(hSubKey, L"Publisher", NULL, &type, (LPBYTE)publisherW, &size);
+
+            size = sizeof(installLocationW);
+            RegQueryValueExW(hSubKey, L"InstallLocation", NULL, &type, (LPBYTE)installLocationW, &size);
+
+            std::wstring exePathW;
+            if (wcslen(installLocationW) > 0) {
+                WIN32_FIND_DATAW findData;
+                std::wstring searchPattern = std::wstring(installLocationW) + L"\\*.exe";
+                HANDLE hFind = FindFirstFileW(searchPattern.c_str(), &findData);
+
+                if (hFind != INVALID_HANDLE_VALUE) {
+                    do {
+                        std::wstring exeName = findData.cFileName;
+                        std::wstring lower = exeName;
+                        std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
+
+                        if (lower.find(L"unins") == std::wstring::npos &&
+                            lower.find(L"setup") == std::wstring::npos &&
+                            lower.find(L"installer") == std::wstring::npos) {
+                            exePathW = std::wstring(installLocationW) + L"\\" + exeName;
+                            break;
+                        }
+                    } while (FindNextFileW(hFind, &findData));
+                    FindClose(hFind);
+                }
+            }
+
+            std::string name = utf8_from_wstring(displayNameW);
+            std::string publisher = utf8_from_wstring(publisherW);
+            std::string exePath = exePathW.empty()
+                ? "N/A"
+                : utf8_from_wstring(exePathW);
+            std::string installPath = utf8_from_wstring(installLocationW);
+
+            if (!first) ss << ",";
+            first = false;
+
+            ss << "{"
+               << "\"name\":\"" << escapeJson(name) << "\"";
+
+            if (!publisher.empty())
+                ss << ",\"publisher\":\"" << escapeJson(publisher) << "\"";
+
+            ss << ",\"exe\":\"" << escapeJson(exePath) << "\""
+               << ",\"path\":\"" << escapeJson(exePath == "N/A" ? installPath : exePath) << "\""
+               << "}";
+
+            RegCloseKey(hSubKey);
+
+            if (++count >= 150) break;
         }
+
+        RegCloseKey(hKey);
+        if (count >= 150) break;
     }
-    
+
     ss << "]";
     return ss.str();
+}
+
+
+std::string ProcessManager::utf8_from_wstring(const std::wstring& w) {
+    if (w.empty()) return {};
+
+    int size = WideCharToMultiByte(
+        CP_UTF8,
+        0,
+        w.c_str(),
+        (int)w.size(),
+        nullptr,
+        0,
+        nullptr,
+        nullptr
+    );
+
+    std::string result(size, '\0');
+
+    WideCharToMultiByte(
+        CP_UTF8,
+        0,
+        w.c_str(),
+        (int)w.size(),
+        &result[0],   // 🔥 FIX Ở ĐÂY
+        size,
+        nullptr,
+        nullptr
+    );
+
+    return result;
 }
