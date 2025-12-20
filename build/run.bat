@@ -1,0 +1,1 @@
+g++ -std=c++14 -IC:\msys64\mingw64\include -g src/modules/*.cpp src/server/*.cpp src/main.cpp -o "build\out.exe" -lws2_32 -lole32 -lmf -luuid -lshlwapi -lshell32 -lmfplat -lmfreadwrite -lmfuuid -ld3d9 -loleaut32 -lgdi32 -liphlpapi

@@ -1,0 +1,782 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Process Manager - Chat Interface</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 900px;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            height: 90vh;
+            max-height: 800px;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            color: white;
+            padding: 25px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 14px;
+            margin-bottom: 15px;
+        }
+
+        .status-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            padding: 12px;
+            background: rgba(0,0,0,0.2);
+            border-radius: 8px;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #e74c3c;
+        }
+
+        .status-indicator.connected {
+            background: #27ae60;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(1.2); }
+        }
+
+        .status-text {
+            font-size: 15px;
+            font-weight: 500;
+        }
+
+        .controls {
+            padding: 20px;
+            background: #f8f9fa;
+            border-bottom: 2px solid #e9ecef;
+        }
+
+        .connection-row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            min-width: 150px;
+            padding: 12px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #3498db;
+            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+        }
+
+        input[type="text"]:disabled {
+            background: #f8f9fa;
+            cursor: not-allowed;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 14px;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+
+        button:disabled {
+            background: #bdc3c7;
+            cursor: not-allowed;
+            transform: none;
+            opacity: 0.6;
+        }
+
+        .btn-connect {
+            background: linear-gradient(135deg, #27ae60 0%, #229954 100%);
+            color: white;
+        }
+
+        .btn-disconnect {
+            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+            color: white;
+        }
+
+        .btn-scan {
+            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+            color: white;
+        }
+
+        .btn-send {
+            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+            color: white;
+        }
+
+        .btn-clear {
+            background: linear-gradient(135deg, #95a5a6 0%, #7f8c8d 100%);
+            color: white;
+        }
+
+        .btn-action {
+            background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%);
+            color: white;
+            padding: 10px 16px;
+            font-size: 13px;
+        }
+
+        .quick-commands {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+
+        .messages-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .messages-header {
+            padding: 15px 25px;
+            background: linear-gradient(135deg, #34495e 0%, #2c3e50 100%);
+            color: white;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid #2c3e50;
+        }
+
+        .messages-count {
+            font-size: 13px;
+            opacity: 0.9;
+            background: rgba(255,255,255,0.1);
+            padding: 4px 12px;
+            border-radius: 12px;
+        }
+
+        .messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: #ecf0f1;
+        }
+
+        .message {
+            margin-bottom: 16px;
+            padding: 12px 16px;
+            border-radius: 12px;
+            max-width: 80%;
+            word-wrap: break-word;
+            animation: fadeIn 0.3s ease;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .message.sent {
+            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+            color: white;
+            margin-left: auto;
+            border-bottom-right-radius: 4px;
+        }
+
+        .message.received {
+            background: white;
+            color: #2c3e50;
+            border-bottom-left-radius: 4px;
+            border: 2px solid #e9ecef;
+        }
+
+        .message.system {
+            background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%);
+            color: white;
+            text-align: center;
+            max-width: 90%;
+            margin: 10px auto;
+        }
+
+        .message.error {
+            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+            color: white;
+            text-align: center;
+            max-width: 90%;
+            margin: 10px auto;
+        }
+
+        .message.success {
+            background: linear-gradient(135deg, #27ae60 0%, #229954 100%);
+            color: white;
+            text-align: center;
+            max-width: 90%;
+            margin: 10px auto;
+        }
+
+        .message-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+
+        .message-sender {
+            font-weight: 600;
+            font-size: 13px;
+        }
+
+        .message-timestamp {
+            font-size: 11px;
+            opacity: 0.7;
+        }
+
+        .message-content {
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .input-area {
+            padding: 20px;
+            background: white;
+            border-top: 2px solid #e9ecef;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 10px;
+        }
+
+        .input-group input {
+            flex: 1;
+        }
+
+        .connection-info {
+            padding: 12px 20px;
+            background: #f8f9fa;
+            border-top: 1px solid #e9ecef;
+            font-size: 12px;
+            color: #7f8c8d;
+            text-align: center;
+        }
+
+        .messages::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .messages::-webkit-scrollbar-track {
+            background: #dfe6e9;
+        }
+
+        .messages::-webkit-scrollbar-thumb {
+            background: #95a5a6;
+            border-radius: 4px;
+        }
+
+        .messages::-webkit-scrollbar-thumb:hover {
+            background: #7f8c8d;
+        }
+
+        .scan-results {
+            display: none;
+            background: white;
+            border: 2px solid #27ae60;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+        }
+
+        .server-item {
+            padding: 12px;
+            margin: 8px 0;
+            background: #f8f9fa;
+            border: 2px solid #27ae60;
+            border-radius: 6px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        @media (max-width: 768px) {
+            body {
+                padding: 0;
+            }
+
+            .container {
+                border-radius: 0;
+                height: 100vh;
+                max-height: none;
+            }
+
+            .header {
+                padding: 20px;
+            }
+
+            .controls {
+                padding: 15px;
+            }
+
+            .connection-row {
+                flex-direction: column;
+            }
+
+            .button-group {
+                flex-direction: column;
+            }
+
+            button {
+                width: 100%;
+                justify-content: center;
+            }
+
+            .message {
+                max-width: 90%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>💬 WebSocket Process Manager</h1>
+            <p>Chat-Style Remote Control Interface</p>
+            <div class="status-container">
+                <div id="statusIndicator" class="status-indicator"></div>
+                <span id="statusText" class="status-text">Not Connected</span>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <div class="connection-row">
+                <input type="text" id="serverIp" placeholder="Server IP (e.g., 192.168.1.100)">
+                <input type="text" id="serverPort" value="8080" placeholder="Port" style="max-width: 100px;">
+            </div>
+            
+            <div class="button-group">
+                <button id="btnConnect" class="btn-connect" onclick="connect()">
+                    <span>🔗</span> Connect
+                </button>
+                <button id="btnDisconnect" class="btn-disconnect" onclick="disconnect()" disabled>
+                    <span>🔴</span> Disconnect
+                </button>
+                <button class="btn-scan" onclick="scanNetwork()">
+                    <span>🔍</span> Scan Network
+                </button>
+            </div>
+
+            <div id="scanResults" class="scan-results">
+                <strong style="color: #27ae60;">Available Servers:</strong>
+                <div id="serverList"></div>
+            </div>
+            
+            <div class="quick-commands">
+                <button class="btn-action" onclick="sendCommand('list_processes')" id="btnListProc" disabled>
+                    📋 List Processes
+                </button>
+                <button class="btn-action" onclick="sendCommand('list_applications')" id="btnListApps" disabled>
+                    📱 List Apps
+                </button>
+                <button class="btn-clear" onclick="clearMessages()">
+                    🗑️ Clear
+                </button>
+            </div>
+        </div>
+        
+        <div class="messages-container">
+            <div class="messages-header">
+                <span><strong>💬 Message History</strong></span>
+                <span id="messagesCount" class="messages-count">0 messages</span>
+            </div>
+            <div id="messages" class="messages">
+                <div class="message system">
+                    <div class="message-content">
+                        🎯 Welcome to WebSocket Process Manager!<br>
+                        Enter server IP and click "Connect" to start.
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="input-area">
+            <div class="input-group">
+                <input type="text" id="messageInput" placeholder="Type a command or message..." disabled>
+                <button id="btnSend" class="btn-send" onclick="sendMessage()" disabled>
+                    <span>📤</span> Send
+                </button>
+            </div>
+        </div>
+        
+        <div class="connection-info">
+            Server: <span id="serverAddress">Not connected</span>
+        </div>
+    </div>
+
+    <script>
+        let socket = null;
+        let messageCount = 0;
+
+        const statusIndicator = document.getElementById('statusIndicator');
+        const statusText = document.getElementById('statusText');
+        const messagesElement = document.getElementById('messages');
+        const messageInput = document.getElementById('messageInput');
+        const btnConnect = document.getElementById('btnConnect');
+        const btnDisconnect = document.getElementById('btnDisconnect');
+        const btnSend = document.getElementById('btnSend');
+        const btnListProc = document.getElementById('btnListProc');
+        const btnListApps = document.getElementById('btnListApps');
+        const messagesCount = document.getElementById('messagesCount');
+        const serverAddress = document.getElementById('serverAddress');
+
+        function updateStatus(status, message) {
+            statusText.textContent = message;
+            statusIndicator.className = 'status-indicator';
+            
+            if (status === 'connected') {
+                statusIndicator.classList.add('connected');
+            }
+        }
+
+        function connect() {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                addSystemMessage('Already connected to server!');
+                return;
+            }
+
+            const serverIp = document.getElementById('serverIp').value.trim();
+            const serverPort = document.getElementById('serverPort').value.trim();
+
+            if (!serverIp) {
+                alert('⚠️ Please enter the server IP address!');
+                document.getElementById('serverIp').focus();
+                return;
+            }
+
+            const wsUrl = `ws://${serverIp}:${serverPort}`;
+            updateStatus('connecting', 'Connecting...');
+            addSystemMessage(`🔌 Connecting to ${wsUrl}...`);
+            
+            try {
+                socket = new WebSocket(wsUrl);
+                
+                socket.onopen = function(event) {
+                    updateStatus('connected', 'Connected ✅');
+                    messageInput.disabled = false;
+                    btnSend.disabled = false;
+                    btnConnect.disabled = true;
+                    btnDisconnect.disabled = false;
+                    btnListProc.disabled = false;
+                    btnListApps.disabled = false;
+                    serverAddress.textContent = wsUrl;
+                    
+                    addMessage('System', '✅ Connected successfully to server!', 'success');
+                };
+                
+                socket.onmessage = function(event) {
+                    const message = event.data;
+                    
+                    try {
+                        const data = JSON.parse(message);
+                        handleStructuredResponse(data);
+                    } catch (e) {
+                        addMessage('Server', message, 'received');
+                    }
+                };
+                
+                socket.onclose = function(event) {
+                    updateStatus('error', 'Disconnected ❌');
+                    messageInput.disabled = true;
+                    btnSend.disabled = true;
+                    btnConnect.disabled = false;
+                    btnDisconnect.disabled = true;
+                    btnListProc.disabled = true;
+                    btnListApps.disabled = true;
+                    serverAddress.textContent = 'Not connected';
+                    
+                    if (event.wasClean) {
+                        addMessage('System', '🔴 Connection closed safely.', 'error');
+                    } else {
+                        addMessage('System', '💥 Connection lost!', 'error');
+                    }
+                };
+                
+                socket.onerror = function(error) {
+                    updateStatus('error', 'Connection Error ❌');
+                    addMessage('System', '❌ Cannot connect to server! Check IP and ensure server is running.', 'error');
+                };
+                
+            } catch (error) {
+                updateStatus('error', 'Connection Error ❌');
+                addMessage('System', '❌ Error creating WebSocket connection!', 'error');
+            }
+        }
+
+        function disconnect() {
+            if (socket) {
+                socket.close(1000, 'Client disconnected');
+                socket = null;
+            }
+            updateStatus('error', 'Disconnected');
+            addMessage('System', '🔴 Disconnected from server.', 'error');
+        }
+
+        function sendMessage() {
+            const message = messageInput.value.trim();
+            
+            if (!message) {
+                addMessage('System', '⚠️ Please enter a message!', 'error');
+                return;
+            }
+            
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
+                addMessage('System', '❌ Not connected to server!', 'error');
+                return;
+            }
+            
+            try {
+                socket.send(message);
+                addMessage('You', message, 'sent');
+                messageInput.value = '';
+                messageInput.focus();
+            } catch (error) {
+                addMessage('System', '❌ Failed to send message!', 'error');
+            }
+        }
+
+        function sendCommand(command) {
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
+                addMessage('System', '❌ Not connected to server!', 'error');
+                return;
+            }
+            
+            socket.send(command);
+            addMessage('You', command, 'sent');
+        }
+
+        function handleStructuredResponse(data) {
+            if (Array.isArray(data)) {
+                if (data.length > 0) {
+                    if (data[0].pid !== undefined) {
+                        displayProcessList(data);
+                    } else if (data[0].name !== undefined) {
+                        displayAppList(data);
+                    }
+                } else {
+                    addMessage('Server', 'No data returned', 'received');
+                }
+            } else if (data.status) {
+                const msgType = data.status === 'success' ? 'success' : 'error';
+                const icon = data.status === 'success' ? '✅' : '❌';
+                addMessage('Server', `${icon} ${data.message || data.status}`, msgType);
+            }
+        }
+
+        function displayProcessList(processes) {
+            let html = `<strong>📋 Running Processes (${processes.length}):</strong><br><br>`;
+            processes.slice(0, 20).forEach(proc => {
+                html += `• <strong>PID ${proc.pid}:</strong> ${proc.name}<br>`;
+            });
+            if (processes.length > 20) {
+                html += `<br><em>... and ${processes.length - 20} more processes</em>`;
+            }
+            addMessage('Server', html, 'received');
+        }
+
+        function displayAppList(apps) {
+            const launchable = apps.filter(app => app.exe !== 'N/A').length;
+            let html = `<strong>📱 Installed Applications (${apps.length}):</strong><br>`;
+            html += `<em>${launchable} launchable apps</em><br><br>`;
+            apps.slice(0, 15).forEach(app => {
+                const icon = app.exe !== 'N/A' ? '✅' : '⚠️';
+                html += `${icon} <strong>${app.name}</strong><br>`;
+            });
+            if (apps.length > 15) {
+                html += `<br><em>... and ${apps.length - 15} more apps</em>`;
+            }
+            addMessage('Server', html, 'received');
+        }
+
+        function addMessage(sender, message, type) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+            
+            const timestamp = new Date().toLocaleTimeString('en-US', {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+            
+            if (type === 'sent' || type === 'received') {
+                messageDiv.innerHTML = `
+                    <div class="message-header">
+                        <span class="message-sender">${sender}</span>
+                        <span class="message-timestamp">${timestamp}</span>
+                    </div>
+                    <div class="message-content">${message}</div>
+                `;
+            } else {
+                messageDiv.innerHTML = `
+                    <div class="message-content">${message}</div>
+                `;
+            }
+            
+            messagesElement.appendChild(messageDiv);
+            messagesElement.scrollTop = messagesElement.scrollHeight;
+            
+            messageCount++;
+            updateMessagesCount();
+        }
+
+        function addSystemMessage(message) {
+            addMessage('System', message, 'system');
+        }
+
+        function clearMessages() {
+            if (confirm('Clear all messages?')) {
+                messagesElement.innerHTML = '';
+                messageCount = 0;
+                updateMessagesCount();
+                addSystemMessage('🗑️ Messages cleared.');
+            }
+        }
+
+        function updateMessagesCount() {
+            messagesCount.textContent = `${messageCount} messages`;
+        }
+
+        async function scanNetwork() {
+            const scanResults = document.getElementById('scanResults');
+            const serverList = document.getElementById('serverList');
+            const port = document.getElementById('serverPort').value || '8080';
+            
+            scanResults.style.display = 'block';
+            serverList.innerHTML = '<p style="padding: 15px; text-align: center; color: #666;">🔍 Scanning network...</p>';
+            addSystemMessage('🔍 Starting network scan...');
+            
+            const ipRanges = ['192.168.1', '192.168.0', '10.0.0', '127.0.0'];
+            const foundServers = [];
+            const promises = [];
+            
+            const testIP = (ip) => {
+                return new Promise((resolve) => {
+                    const testWs = new WebSocket(`ws://${ip}:${port}`);
+                    const timeout = setTimeout(() => {
+                        testWs.close();
+                        resolve(false);
+                    }, 2000);
+                    
+                    testWs.onopen = () => {
+                        clearTimeout(timeout);
+                        foundServers.push(ip);
+                        testWs.close();
+                        resolve(true);
+                    };
+                    
+                    testWs.onerror = () => {
+                        clearTimeout(timeout);
+                        resolve(false);
+                    };
+                });
+            };
+            
+            for (const subnet of ipRanges) {
+                const ipsToScan = [1, 2, 3, 4, 5, 100, 101, 102, 150, 200, 254];
+                for (const lastOctet of ipsToScan) {
+                    promises.push(testIP(`${subnet}.${lastOctet}`));
+                }
+            }
+            
+            await Promise.all(promises);
+            
+            if (foundServers.length > 0) {
+                let html = `<p style="margin: 10px 0; color: #27ae60; font-weight: bold;">✅ Found ${foundServers.length} server(s)</p>`;
+                foundServers.forEach(ip => {
+                    html += `<div class="server-item">
+                        <strong>${ip}:${port}</strong>
+                        <button class="btn-connect" onclick="selectServer('${ip}')" style="padding: 8px 16px;">✔️ Select</button>
+                    </div>`;
+                });
+                serverList.innerHTML = html;
+                addMessage('System', `✅ Found ${foundServers.length} server(s)`, 'success');
+            } else {
+                serverList.innerHTML = `<p style="padding: 15px; color: #e74c3c;">❌ No servers found. Check that server is running and firewall allows port ${port}.</p>`;
+                addMessage('System', '❌ No servers found on network', 'error');
+            }
+        }
+
+        function selectServer(ip) {
+            document.getElementById('serverIp').value = ip;
+            addSystemMessage(`✅ Selected server: ${ip}`);
+        }
+
+        messageInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+        window.addEventListener('load', function() {
+            updateMessagesCount();
+        });
+    </script>
+</body>
+</html>

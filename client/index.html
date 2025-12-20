@@ -1,0 +1,814 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Process Manager Pro</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 36px;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .header p {
+            font-size: 16px;
+            opacity: 0.9;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            margin-bottom: 20px;
+        }
+
+        h2 {
+            color: #2c3e50;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+            font-size: 24px;
+        }
+
+        .status {
+            padding: 15px 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 16px;
+        }
+
+        .status::before {
+            content: '';
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .status.connected {
+            background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+            color: #155724;
+            border: 2px solid #28a745;
+        }
+
+        .status.connected::before {
+            background: #28a745;
+            animation: pulse 2s infinite;
+        }
+
+        .status.disconnected {
+            background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%);
+            color: #721c24;
+            border: 2px solid #dc3545;
+        }
+
+        .status.disconnected::before {
+            background: #dc3545;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(1.2); }
+        }
+
+        .connection-panel {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+
+        .input-group {
+            margin-bottom: 15px;
+        }
+
+        .input-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 15px;
+            transition: all 0.3s ease;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #3498db;
+            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+        }
+
+        .button-group {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+        }
+
+        button:active:not(:disabled) {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+            color: white;
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #27ae60 0%, #229954 100%);
+            color: white;
+        }
+
+        .btn-danger {
+            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+            color: white;
+        }
+
+        .btn-warning {
+            background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%);
+            color: white;
+        }
+
+        .btn-secondary {
+            background: linear-gradient(135deg, #95a5a6 0%, #7f8c8d 100%);
+            color: white;
+        }
+
+        .info-box {
+            background: linear-gradient(135deg, #e7f3ff 0%, #d4e9ff 100%);
+            border: 2px solid #3498db;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 15px 0;
+        }
+
+        .info-box strong {
+            color: #2980b9;
+        }
+
+        .warning-box {
+            background: linear-gradient(135deg, #fff3cd 0%, #ffe69c 100%);
+            border: 2px solid #ffc107;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 15px 0;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        thead {
+            background: linear-gradient(135deg, #34495e 0%, #2c3e50 100%);
+            color: white;
+        }
+
+        th {
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        td {
+            padding: 12px 15px;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        tbody tr {
+            transition: all 0.2s ease;
+        }
+
+        tbody tr:hover {
+            background: #f8f9fa;
+            transform: scale(1.01);
+        }
+
+        tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        .process-list, .app-list {
+            max-height: 500px;
+            overflow-y: auto;
+            border: 2px solid #e9ecef;
+            border-radius: 10px;
+        }
+
+        #output {
+            background: #2c3e50;
+            color: #ecf0f1;
+            border-radius: 10px;
+            padding: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        #output::-webkit-scrollbar,
+        .process-list::-webkit-scrollbar,
+        .app-list::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        #output::-webkit-scrollbar-track,
+        .process-list::-webkit-scrollbar-track,
+        .app-list::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+
+        #output::-webkit-scrollbar-thumb,
+        .process-list::-webkit-scrollbar-thumb,
+        .app-list::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 10px;
+        }
+
+        #output::-webkit-scrollbar-thumb:hover,
+        .process-list::-webkit-scrollbar-thumb:hover,
+        .app-list::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+
+        .scan-results {
+            display: none;
+            background: white;
+            border: 2px solid #28a745;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 15px 0;
+        }
+
+        .server-item {
+            padding: 15px;
+            margin: 10px 0;
+            background: white;
+            border: 2px solid #28a745;
+            border-radius: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all 0.3s ease;
+        }
+
+        .server-item:hover {
+            transform: translateX(5px);
+            box-shadow: 0 5px 15px rgba(40, 167, 69, 0.2);
+        }
+
+        .search-box {
+            margin: 15px 0;
+        }
+
+        .search-box input {
+            width: 100%;
+            padding: 15px 20px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 16px;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .badge-success {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .badge-warning {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+
+            .container {
+                padding: 20px;
+                border-radius: 10px;
+            }
+
+            .header h1 {
+                font-size: 28px;
+            }
+
+            .button-group {
+                flex-direction: column;
+            }
+
+            button {
+                width: 100%;
+                justify-content: center;
+            }
+
+            table {
+                font-size: 12px;
+            }
+
+            th, td {
+                padding: 10px 8px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🔌 WebSocket Process Manager Pro</h1>
+        <p>Advanced Remote Process & Application Control System</p>
+    </div>
+    
+    <div class="container">
+        <h2>📡 Connection Status</h2>
+        <div id="status" class="status disconnected">Disconnected from server</div>
+        
+        <div class="connection-panel">
+            <div class="input-group">
+                <label for="serverIp">🌐 Server IP Address</label>
+                <input type="text" id="serverIp" placeholder="e.g., 192.168.1.100">
+            </div>
+            
+            <div class="input-group">
+                <label for="serverPort">🔌 Server Port</label>
+                <input type="text" id="serverPort" value="8080" placeholder="8080">
+            </div>
+            
+            <div class="button-group">
+                <button id="connectBtn" onclick="connect()" class="btn-success">
+                    <span>🔗</span> Connect to Server
+                </button>
+                <button id="disconnectBtn" onclick="disconnect()" disabled class="btn-danger">
+                    <span>🔴</span> Disconnect
+                </button>
+                <button onclick="scanNetwork()" class="btn-primary">
+                    <span>🔍</span> Scan Network
+                </button>
+            </div>
+            
+            <div class="info-box">
+                <strong>ℹ️ Connection Guide:</strong>
+                <ol style="margin: 10px 0 0 20px; padding: 0;">
+                    <li>Click "🔍 Scan Network" to auto-discover servers</li>
+                    <li>Or manually enter the server IP from websocket_server.exe</li>
+                    <li>Click "Connect to Server"</li>
+                    <li>Ensure both devices are on the same network</li>
+                </ol>
+            </div>
+            
+            <div id="scanResults" class="scan-results">
+                <strong style="color: #28a745;">✅ Available Servers:</strong>
+                <div id="serverList" style="margin-top: 15px;"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>⚙️ Process Control</h2>
+        
+        <div class="button-group" style="margin-bottom: 15px;">
+            <button onclick="listProcesses()" class="btn-primary">
+                <span>🔄</span> Refresh Process List
+            </button>
+        </div>
+        
+        <div class="input-group">
+            <label for="processPath">🚀 Start New Process</label>
+            <div style="display: flex; gap: 10px;">
+                <input type="text" id="processPath" placeholder="notepad.exe or C:\path\to\app.exe" style="flex: 1;">
+                <button onclick="startProcessDirect()" class="btn-success">
+                    <span>▶️</span> Start
+                </button>
+            </div>
+        </div>
+        
+        <div class="warning-box">
+            <strong>⚠️ Note:</strong> Click the "Kill" button next to any process to terminate it. Use with caution!
+        </div>
+        
+        <div class="process-list" id="processList">
+            <p style="padding: 40px; text-align: center; color: #999;">
+                No processes loaded. Click "Refresh Process List" to view running processes.
+            </p>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>📱 Application Control</h2>
+        
+        <div class="button-group" style="margin-bottom: 15px;">
+            <button onclick="listApplications()" class="btn-primary">
+                <span>📋</span> List All Applications
+            </button>
+        </div>
+        
+        <div class="search-box">
+            <input type="text" id="appSearch" placeholder="🔍 Search applications..." onkeyup="filterApplications()">
+        </div>
+        
+        <div class="warning-box">
+            <strong>ℹ️ About UWP Apps:</strong> Apps marked "UWP/Store App" cannot be launched directly from this tool. 
+            Launch them from the Windows Start Menu instead, or use the Process Control section to start them by name.
+        </div>
+        
+        <div class="app-list" id="appList">
+            <p style="padding: 40px; text-align: center; color: #999;">
+                No applications loaded. Click "List All Applications" to scan installed apps.
+            </p>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>📝 Console Output</h2>
+        <div class="button-group" style="margin-bottom: 15px;">
+            <button onclick="clearOutput()" class="btn-secondary">
+                <span>🗑️</span> Clear Console
+            </button>
+        </div>
+        <div id="output"></div>
+    </div>
+
+    <script>
+        let ws = null;
+        let allApps = [];
+
+        function log(message, type = 'info') {
+            const output = document.getElementById('output');
+            const timestamp = new Date().toLocaleTimeString();
+            const icons = {
+                'error': '❌',
+                'success': '✅',
+                'warning': '⚠️',
+                'info': 'ℹ️'
+            };
+            const colors = {
+                'error': '#e74c3c',
+                'success': '#27ae60',
+                'warning': '#f39c12',
+                'info': '#3498db'
+            };
+            const icon = icons[type] || icons.info;
+            const color = colors[type] || colors.info;
+            
+            output.innerHTML += `<span style="color: ${color};">[${timestamp}] ${icon} ${message}</span>\n`;
+            output.scrollTop = output.scrollHeight;
+        }
+
+        function updateStatus(connected, url) {
+            const status = document.getElementById('status');
+            const connectBtn = document.getElementById('connectBtn');
+            const disconnectBtn = document.getElementById('disconnectBtn');
+            
+            if (connected) {
+                status.textContent = '✅ Connected to ' + url;
+                status.className = 'status connected';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+            } else {
+                status.textContent = '🔴 Disconnected from server';
+                status.className = 'status disconnected';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+            }
+        }
+
+        function connect() {
+            if (ws) return;
+            
+            const serverIp = document.getElementById('serverIp').value.trim();
+            const serverPort = document.getElementById('serverPort').value.trim();
+            
+            if (!serverIp) {
+                alert('⚠️ Please enter the server IP address!');
+                document.getElementById('serverIp').focus();
+                return;
+            }
+            
+            const wsUrl = `ws://${serverIp}:${serverPort}`;
+            log(`🔌 Connecting to ${wsUrl}...`, 'info');
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                log('🎉 Connected successfully!', 'success');
+                updateStatus(true, wsUrl);
+            };
+            
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleResponse(data);
+                } catch (e) {
+                    log('Failed to parse response: ' + e.message, 'error');
+                }
+            };
+            
+            ws.onerror = (error) => {
+                log('❌ Connection error - Check if server is running and IP is correct', 'error');
+            };
+            
+            ws.onclose = () => {
+                log('🔌 Connection closed', 'warning');
+                updateStatus(false);
+                ws = null;
+            };
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+        }
+
+        function send(command) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                log('❌ Not connected to server!', 'error');
+                return;
+            }
+            log('📤 Sending: ' + command, 'info');
+            ws.send(command);
+        }
+
+        function listProcesses() {
+            send('list_processes');
+        }
+
+        function listApplications() {
+            send('list_applications');
+        }
+
+        function startProcessDirect() {
+            const path = document.getElementById('processPath').value;
+            if (!path) {
+                alert('⚠️ Please enter a process path');
+                return;
+            }
+            send('start_process:' + path);
+        }
+
+        function handleResponse(data) {
+            if (Array.isArray(data)) {
+                if (data.length > 0) {
+                    if (data[0].pid !== undefined) {
+                        displayProcesses(data);
+                    } else if (data[0].exe !== undefined || data[0].path !== undefined || data[0].name !== undefined) {
+                        displayApplications(data);
+                    }
+                }
+            } else if (data.status) {
+                if (data.status === 'success') {
+                    log('✅ Operation successful: ' + JSON.stringify(data), 'success');
+                } else {
+                    log('❌ Operation failed: ' + data.message, 'error');
+                }
+            }
+        }
+
+        function displayProcesses(processes) {
+            const list = document.getElementById('processList');
+            
+            if (!processes || processes.length === 0) {
+                list.innerHTML = '<p style="padding: 40px; text-align: center; color: #999;">No processes found</p>';
+                return;
+            }
+            
+            let html = '<table><thead><tr><th>PID</th><th>Process Name</th><th>Action</th></tr></thead><tbody>';
+            
+            processes.forEach(proc => {
+                html += `<tr>
+                    <td><strong style="color: #3498db;">${proc.pid}</strong></td>
+                    <td>${proc.name}</td>
+                    <td><button class="btn-danger" onclick="killProcess(${proc.pid}, '${proc.name.replace(/'/g, "\\'")}')">🗑️ Kill</button></td>
+                </tr>`;
+            });
+            
+            html += '</tbody></table>';
+            list.innerHTML = html;
+            log(`✅ Displayed ${processes.length} processes`, 'success');
+        }
+
+        function killProcess(pid, name) {
+            if (confirm(`⚠️ Are you sure you want to kill "${name}" (PID: ${pid})?`)) {
+                send('stop_process:' + pid);
+                log(`🗑️ Attempting to kill ${name} (PID: ${pid})...`, 'warning');
+            }
+        }
+
+        function displayApplications(apps) {
+            const list = document.getElementById('appList');
+            
+            if (!apps || apps.length === 0) {
+                list.innerHTML = '<p style="padding: 40px; text-align: center; color: #999;">No applications found</p>';
+                return;
+            }
+            
+            allApps = apps;
+            
+            const launchable = apps.filter(app => app.exe !== 'N/A' && app.path).length;
+            const total = apps.length;
+            
+            let html = `<div style="padding: 15px; background: #f8f9fa; border-bottom: 2px solid #e9ecef;">
+                <strong>📊 Statistics:</strong> ${total} applications found 
+                (${launchable} launchable, ${total - launchable} require Start Menu)
+            </div>`;
+            
+            html += '<table><thead><tr><th>Application</th><th>Publisher</th><th>Executable</th><th>Status</th><th>Action</th></tr></thead><tbody>';
+            
+            apps.forEach((app) => {
+                const appName = app.name || 'Unknown';
+                const publisher = app.publisher || 'Unknown Publisher';
+                const exeName = app.exe || 'N/A';
+                const fullPath = app.path || '';
+                
+                const canLaunch = exeName !== 'N/A' && fullPath !== '';
+                const statusBadge = canLaunch 
+                    ? '<span class="badge badge-success">✅ Ready</span>' 
+                    : '<span class="badge badge-warning">⚠️ UWP/Store App</span>';
+                
+                html += `<tr>
+                    <td><strong>${appName}</strong></td>
+                    <td style="font-size: 12px; color: #666;">${publisher}</td>
+                    <td style="font-size: 12px; font-family: monospace;">${exeName}</td>
+                    <td>${statusBadge}</td>
+                    <td>${canLaunch ? `<button class="btn-success" onclick="launchApp('${fullPath.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')">▶️ Launch</button>` : '<span style="color: #999;">Use Start Menu</span>'}</td>
+                </tr>`;
+            });
+            
+            html += '</tbody></table>';
+            list.innerHTML = html;
+            log(`✅ Displayed ${apps.length} applications (${launchable} launchable)`, 'success');
+        }
+
+        function launchApp(path) {
+            send('start_process:' + path);
+            log(`🚀 Launching: ${path}`, 'info');
+        }
+
+        function filterApplications() {
+            const searchTerm = document.getElementById('appSearch').value.toLowerCase();
+            const filtered = allApps.filter(app => 
+                app.name.toLowerCase().includes(searchTerm) || 
+                (app.exe && app.exe.toLowerCase().includes(searchTerm)) ||
+                (app.publisher && app.publisher.toLowerCase().includes(searchTerm))
+            );
+            displayApplications(filtered);
+        }
+
+        function clearOutput() {
+            document.getElementById('output').innerHTML = '';
+        }
+
+        async function scanNetwork() {
+            const scanResults = document.getElementById('scanResults');
+            const serverList = document.getElementById('serverList');
+            const port = document.getElementById('serverPort').value || '8080';
+            
+            scanResults.style.display = 'block';
+            serverList.innerHTML = '<p style="color: #666; padding: 20px; text-align: center;">🔍 Scanning network... Please wait.</p>';
+            log('🔍 Starting network scan on port ' + port, 'info');
+            
+            const ipRanges = ['192.168.1', '192.168.0', '10.0.0', '127.0.0'];
+            const foundServers = [];
+            const promises = [];
+            
+            const testIP = (ip) => {
+                return new Promise((resolve) => {
+                    const testWs = new WebSocket(`ws://${ip}:${port}`);
+                    const timeout = setTimeout(() => {
+                        testWs.close();
+                        resolve(false);
+                    }, 2000);
+                    
+                    testWs.onopen = () => {
+                        clearTimeout(timeout);
+                        foundServers.push(ip);
+                        log(`✅ Found server at ${ip}:${port}`, 'success');
+                        testWs.close();
+                        resolve(true);
+                    };
+                    
+                    testWs.onerror = () => {
+                        clearTimeout(timeout);
+                        resolve(false);
+                    };
+                });
+            };
+            
+            for (const subnet of ipRanges) {
+                const ipsToScan = [1, 2, 3, 4, 5, 100, 101, 102, 150, 200, 254];
+                for (const lastOctet of ipsToScan) {
+                    promises.push(testIP(`${subnet}.${lastOctet}`));
+                }
+            }
+            
+            await Promise.all(promises);
+            
+            if (foundServers.length > 0) {
+                let html = '<p style="color: #28a745; font-weight: bold; margin-bottom: 15px;">✅ Found ' + foundServers.length + ' server(s):</p>';
+                foundServers.forEach(ip => {
+                    html += `<div class="server-item">
+                        <strong style="font-size: 18px;">${ip}:${port}</strong>
+                        <button onclick="selectServer('${ip}')" class="btn-success">✔️ Select</button>
+                    </div>`;
+                });
+                serverList.innerHTML = html;
+                log(`✅ Scan complete: Found ${foundServers.length} server(s)`, 'success');
+            } else {
+                serverList.innerHTML = `<div style="padding: 20px;">
+                    <p style="color: #dc3545; font-weight: bold; margin-bottom: 15px;">❌ No servers found</p>
+                    <p style="color: #666; margin-bottom: 10px;">Troubleshooting steps:</p>
+                    <ol style="color: #666; margin-left: 20px;">
+                        <li>Ensure websocket_server.exe is running</li>
+                        <li>Check Windows Firewall settings (allow port ${port})</li>
+                        <li>Verify both devices are on the same network</li>
+                        <li>Try manual IP entry using ipconfig command</li>
+                    </ol>
+                </div>`;
+                log('❌ Scan complete: No servers found', 'error');
+            }
+        }
+
+        function selectServer(ip) {
+            document.getElementById('serverIp').value = ip;
+            log('✅ Selected server: ' + ip, 'success');
+        }
+
+        window.onload = () => {
+            log('🎯 WebSocket Process Manager Pro loaded. Enter server IP and click Connect.', 'info');
+        };
+    </script>
+</body>
+</html>
